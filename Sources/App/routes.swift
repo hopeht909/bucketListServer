@@ -1,33 +1,59 @@
 import Vapor
-
+import AsyncHTTPClient
 
 func routes(_ app: Application) throws {
+    let taskController = TaskController()
     app.get { req in
         return "It works!"
     }
 
-    app.get("hello") { req -> String in
-        return "Hello, world!"
-    }
+    app.get("tasks",use: taskController.readAll)
     
-    app.get("tasks") { req -> [TaskResponse] in
-        let data = [
-            TaskResponse(createdAt: "Wed Mar 30 2021", objective: "Get this to work"),
-            TaskResponse(createdAt: "Wed Mar 30 2021", objective: "Get this to work well")
-        ]
-        return data
-    }
+    app.post("tasks", use: taskController.create)
     
-    app.post("tasks"){ req -> TaskResponse in
-        
-        if let movie = try? req.content.decode(TaskResponse.self){
-            return movie
-        }
-        return TaskResponse(createdAt: "error", objective: "400")
-    }
+    app.put("tasks",":id", use: taskController.update)
+    
+    app.delete("tasks",":id", use: taskController.delete)
+    
+    
 }
-   
-struct TaskResponse: Content {
-    var createdAt: String
-    var objective: String
+
+
+struct TaskController{
+    
+    func create(req: Request) throws -> EventLoopFuture<Tasks> {
+        let input = try req.content.decode(Tasks.self)
+        let todo = Tasks(id: input.id, objective: input.objective, createdAt: Date())
+            return todo.save(on: req.db)
+                .map { todo }
+        }
+    
+    func readAll(req: Request) throws -> EventLoopFuture<[Tasks]>{
+        return Tasks.query(on: req.db).all()
+    }
+    
+    func update(req: Request) throws -> EventLoopFuture<Tasks> {
+            guard let id = req.parameters.get("id", as: UUID.self) else {
+                throw Abort(.badRequest)
+            }
+            let input = try req.content.decode(Tasks.self)
+            return Tasks.find(id, on: req.db)
+                .unwrap(or: Abort(.notFound))
+                .flatMap { task in
+                    task.objective = input.objective
+                    return task.save(on: req.db)
+                        .map { Tasks(id: task.id!, objective: task.objective,  createdAt: task.createdAt) }
+                }
+        }
+    
+    func delete(req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        guard let id = req.parameters.get("id", as: UUID.self) else {
+                    throw Abort(.badRequest)
+                }
+                return Tasks.find(id, on: req.db)
+                    .unwrap(or: Abort(.notFound))
+                    .flatMap { $0.delete(on: req.db) }
+                    .map { .ok }
+    }
+    
 }
